@@ -208,7 +208,7 @@ async def upload_media(sender, target_chat_id, file, caption, edit, topic_id):
                     thumb=thumb_path,
                     has_spoiler=True,
                     reply_to_message_id=topic_id,
-                    parse_mode=ParseMode.HTML,
+                    parse_mode=ParseMode.MARKDOWN,
                     progress=progress_bar,
                     progress_args=("╔══━⚡️Uploading...⚡️━══╗\n", edit, time.time())
                 )
@@ -221,7 +221,7 @@ async def upload_media(sender, target_chat_id, file, caption, edit, topic_id):
                     photo=file,
                     caption=caption,
                     has_spoiler=True,
-                    parse_mode=ParseMode.HTML,
+                    parse_mode=ParseMode.MARKDOWN,
                     progress=progress_bar,
                     reply_to_message_id=topic_id,
                     progress_args=("╔══━⚡️Uploading...⚡️━══╗\n", edit, time.time())
@@ -236,7 +236,7 @@ async def upload_media(sender, target_chat_id, file, caption, edit, topic_id):
                     caption=caption,
                     thumb=thumb_path,
                     reply_to_message_id=topic_id,
-                    parse_mode=ParseMode.HTML,
+                    parse_mode=ParseMode.MARKDOWN,
                     progress=progress_bar,
                     progress_args=("╔══━⚡️Uploading...⚡️━══╗\n", edit, time.time())
                 )
@@ -248,7 +248,7 @@ async def upload_media(sender, target_chat_id, file, caption, edit, topic_id):
         elif upload_method == "Telethon":
             await edit.delete()
             progress_message = await gf.send_message(sender, "**__Uploading...__**")
-            caption_html = caption if caption else None
+            caption_html = await format_caption_to_html(caption)
 
             uploaded = await fast_upload(
                 gf, file,
@@ -278,7 +278,6 @@ async def upload_media(sender, target_chat_id, file, caption, edit, topic_id):
                 target_chat_id,
                 uploaded,
                 caption=caption_html,
-                parse_mode='html',
                 attributes=attributes,
                 reply_to=topic_id,
                 thumb_path = thumbnail(sender) or await screenshot(file, duration, sender)
@@ -401,7 +400,7 @@ async def get_msg(userbot, sender, edit_id, msg_link, i, message):
         # Rename file
         file = await rename_file(file, sender)
         if msg.audio:
-            result = await app.send_audio(target_chat_id, file, caption=caption, reply_to_message_id=topic_id, parse_mode=ParseMode.HTML)
+            result = await app.send_audio(target_chat_id, file, caption=caption, reply_to_message_id=topic_id)
             await result.copy(LOG_GROUP)
             await edit.delete(1)
             return
@@ -413,7 +412,7 @@ async def get_msg(userbot, sender, edit_id, msg_link, i, message):
             return
 
         if msg.photo:
-            result = await app.send_photo(target_chat_id, file, caption=caption, reply_to_message_id=topic_id, parse_mode=ParseMode.HTML)
+            result = await app.send_photo(target_chat_id, file, caption=caption, reply_to_message_id=topic_id)
             await result.copy(LOG_GROUP)
             await edit.delete(1)
             return
@@ -443,13 +442,13 @@ async def get_msg(userbot, sender, edit_id, msg_link, i, message):
         
 async def clone_message(app, msg, target_chat_id, topic_id, edit_id, log_group):
     edit = await app.edit_message_text(target_chat_id, edit_id, "Cloning...")
-    devgaganin = await app.send_message(target_chat_id, msg.text.html, reply_to_message_id=topic_id, parse_mode=ParseMode.HTML)
+    devgaganin = await app.send_message(target_chat_id, msg.text.markdown, reply_to_message_id=topic_id)
     await devgaganin.copy(log_group)
     await edit.delete()
 
 async def clone_text_message(app, msg, target_chat_id, topic_id, edit_id, log_group):
     edit = await app.edit_message_text(target_chat_id, edit_id, "Cloning text message...")
-    devgaganin = await app.send_message(target_chat_id, msg.text.html, reply_to_message_id=topic_id, parse_mode=ParseMode.HTML)
+    devgaganin = await app.send_message(target_chat_id, msg.text.markdown, reply_to_message_id=topic_id)
     await devgaganin.copy(log_group)
     await edit.delete()
 
@@ -488,28 +487,24 @@ def get_message_file_size(msg):
 
 
 async def get_final_caption(msg, sender):
-    """
-    Preserve Telegram's original formatting exactly.
-
-    Pyrogram's .html property converts the message entities to HTML:
-    bold -> <b>, italic -> <i>, underline -> <u>, strike -> <s>,
-    monospace -> <code>, pre/code -> <pre>, block quote -> <blockquote>,
-    links -> <a href="...">, etc.
-
-    IMPORTANT: Do not run regex replacements over this HTML because doing so
-    can destroy entity boundaries/tags and make normal text appear formatted
-    incorrectly.
-    """
-    original_caption = msg.caption.html if msg.caption else ""
-
+    # Get original caption in markdown if available
+    original_caption = msg.caption.markdown if msg.caption else ""
+    
+    # Add custom caption if present
     custom_caption = get_user_caption_preference(sender)
-    if custom_caption:
-        # Custom caption is user-entered plain text, so escape it before
-        # appending to the already-valid Telegram HTML.
-        custom_html = escape(str(custom_caption))
-        return f"{original_caption}\n\n{custom_html}".strip()
+    final_caption = f"{original_caption}\n\n{custom_caption}" if custom_caption else original_caption
 
-    return original_caption.strip() if original_caption else None
+    # Replace @mentions with @Real_Pirates
+    final_caption = re.sub(r'@\w+', '𓍯𝙎𝙪𝙟𝙖𝙡⚝', final_caption)
+
+    # Replace all links with your channel link
+
+    # Perform additional replacements from user-defined rules
+    replacements = load_replacement_words(sender)
+    for word, replace_word in replacements.items():
+        final_caption = final_caption.replace(word, replace_word)
+
+    return final_caption.strip() if final_caption else None
 
 
 
@@ -543,150 +538,117 @@ async def download_user_stories(userbot, chat_id, msg_id, edit, sender):
         await edit.edit(f"Error: {e}")
         
 async def copy_message_with_chat_id(app, userbot, sender, chat_id, message_id, edit):
-    """Process public channel/group messages through the same userbot path as private links.
-
-    This is for chats the logged-in userbot can legitimately access.  It avoids
-    the bot-only copy path so public posts and private-access posts follow the
-    same formatting/media pipeline.
-    """
     target_chat_id = user_chat_ids.get(sender, sender)
     file = None
-    size_limit = 2 * 1024 * 1024 * 1024
+    result = None
+    size_limit = 2 * 1024 * 1024 * 1024  # 2 GB size limit
 
     try:
-        # IMPORTANT: use the logged-in userbot for public chats too.
-        # This makes public channel/group processing match the private path.
-        msg = await userbot.get_messages(chat_id, message_id)
+        msg = await app.get_messages(chat_id, message_id)
+        custom_caption = get_user_caption_preference(sender)
+        final_caption = format_caption(msg.caption or '', sender, custom_caption)
 
-        if not msg or msg.service or msg.empty:
-            await edit.edit("❌ Message not found or unavailable.")
-            return
-
+        # Parse target_chat_id and topic_id
         topic_id = None
         if '/' in str(target_chat_id):
-            target_chat_id, topic_id = map(int, str(target_chat_id).split('/', 1))
+            target_chat_id, topic_id = map(int, target_chat_id.split('/', 1))
 
-        # Text/web-preview messages: preserve Telegram entities via HTML.
-        if msg.text:
-            html_text = msg.text.html or ""
-            result = await app.send_message(
-                target_chat_id,
-                html_text,
-                reply_to_message_id=topic_id,
-                parse_mode=ParseMode.HTML
+        # Handle different media types
+        if msg.media:
+            result = await send_media_message(app, target_chat_id, msg, final_caption, topic_id)
+            return
+        elif msg.text:
+            result = await app.copy_message(target_chat_id, chat_id, message_id, reply_to_message_id=topic_id)
+            return
+
+        # Fallback if result is None
+        if result is None:
+            await edit.edit("Trying if it is a group...")
+            chat_id = (await userbot.get_chat(f"@{chat_id}")).id
+            msg = await userbot.get_messages(chat_id, message_id)
+
+            if not msg or msg.service or msg.empty:
+                return
+
+            if msg.text:
+                await app.send_message(target_chat_id, msg.text.markdown, reply_to_message_id=topic_id)
+                return
+
+            final_caption = format_caption(msg.caption.markdown if msg.caption else "", sender, custom_caption)
+            file = await userbot.download_media(
+                msg,
+                progress=progress_bar,
+                progress_args=("╭─────────────────────╮\n│      **__Downloading__...**\n├─────────────────────", edit, time.time())
             )
-            if LOG_GROUP:
-                await result.copy(LOG_GROUP)
-            return
+            file = await rename_file(file, sender)
 
-        if msg.sticker:
-            result = await app.send_sticker(
-                target_chat_id,
-                msg.sticker.file_id,
-                reply_to_message_id=topic_id
-            )
-            if LOG_GROUP:
-                await result.copy(LOG_GROUP)
-            return
+            if msg.photo:
+                result = await app.send_photo(target_chat_id, file, caption=final_caption, reply_to_message_id=topic_id)
+            elif msg.video or msg.document:
+                freecheck = await chk_user(chat_id, sender)
+                if file_size > size_limit and (freecheck == 1 or pro is None):
+                    await edit.delete()
+                    await split_and_upload_file(app, sender, target_chat_id, file, caption, topic_id)
+                    return       
+                elif file_size > size_limit:
+                    await handle_large_file(file, sender, edit, final_caption)
+                    return
+                await upload_media(sender, target_chat_id, file, final_caption, edit, topic_id)
+            elif msg.audio:
+                result = await app.send_audio(target_chat_id, file, caption=final_caption, reply_to_message_id=topic_id)
+            elif msg.voice:
+                result = await app.send_voice(target_chat_id, file, reply_to_message_id=topic_id)
+            elif msg.sticker:
+                result = await app.send_sticker(target_chat_id, msg.sticker.file_id, reply_to_message_id=topic_id)
+            else:
+                await edit.edit("Unsupported media type.")
 
-        file_size = get_message_file_size(msg)
-        file_name = await get_media_filename(msg)
-        await edit.edit("**>Downloading...**")
-
-        file = await userbot.download_media(
-            msg,
-            file_name=file_name,
-            progress=progress_bar,
-            progress_args=(
-                "╔══━⚡️ Downloading ⚡️━══╗\n",
-                edit,
-                time.time()
-            )
-        )
-
-        if not file:
-            await edit.edit("❌ Unable to download this media.")
-            return
-
-        caption = await get_final_caption(msg, sender)
-        file = await rename_file(file, sender, caption)
-
-        if msg.audio:
-            result = await app.send_audio(
-                target_chat_id, file, caption=caption,
-                reply_to_message_id=topic_id,
-                parse_mode=ParseMode.HTML
-            )
-            if LOG_GROUP:
-                await result.copy(LOG_GROUP)
-            return
-
-        if msg.voice:
-            result = await app.send_voice(
-                target_chat_id, file,
-                reply_to_message_id=topic_id
-            )
-            if LOG_GROUP:
-                await result.copy(LOG_GROUP)
-            return
-
-        if msg.photo:
-            result = await app.send_photo(
-                target_chat_id, file, caption=caption,
-                reply_to_message_id=topic_id,
-                parse_mode=ParseMode.HTML
-            )
-            if LOG_GROUP:
-                await result.copy(LOG_GROUP)
-            return
-
-        # Use the same upload pipeline as the private path.
-        if file_size > size_limit and (free_check == 1 or pro is None):
-            await edit.delete()
-            await split_and_upload_file(
-                app, sender, target_chat_id, file, caption, topic_id
-            )
-            file = None
-            return
-
-        if file_size > size_limit:
-            await handle_large_file(file, sender, edit, caption)
-            file = None
-            return
-
-        await upload_media(
-            sender, target_chat_id, file, caption, edit, topic_id
-        )
-        file = None
-
-    except (ChannelBanned, ChannelInvalid, ChannelPrivate, ChatIdInvalid, ChatInvalid):
-        await edit.edit("❌ The logged-in account cannot access this public chat/message.")
     except Exception as e:
-        print(f"Public message processing error: {e}")
-        try:
-            await edit.edit(f"❌ Error: `{e}`")
-        except Exception:
-            pass
+        print(f"Error : {e}")
+        pass
+        #error_message = f"Error occurred while processing message: {str(e)}"
+        # await app.send_message(sender, error_message)
+        # await app.send_message(sender, f"Make Bot admin in your Channel - {target_chat_id} and restart the process after /cancel")
+
     finally:
         if file and os.path.exists(file):
             os.remove(file)
 
 async def send_media_message(app, target_chat_id, msg, caption, topic_id):
-    """Send accessible source media while preserving its original caption formatting."""
     try:
-        # IMPORTANT:
-        # Do not add the downloaded filename when a source caption already exists.
-        # The caller supplies Telegram HTML generated from msg.caption.html.
-        # ParseMode.HTML makes <b>, <i>, links, code, spoilers, etc. render
-        # instead of appearing literally in the output message.
+        file_name = None
 
+        # Try to get file name if available
+        if msg.document and msg.document.file_name:
+            file_name = msg.document.file_name
+        elif msg.video and msg.video.file_name:
+            file_name = msg.video.file_name
+
+        # If no caption, but file name exists, use it
+        if not caption and file_name:
+            caption = f"> 🗃️ **{file_name}**"
+        elif caption and file_name:
+            # Add blockquote formatting
+            caption = re.sub(
+                r'https?://t\.me/[^\s]+|https?://telegram\.me/[^\s]+',
+                '𓍯𝙎𝙪𝙟𝙖𝙡⚝',
+                caption
+            )
+            caption = "\n".join([f"> {line}" for line in caption.strip().splitlines()])
+            caption = f">🗃️ **{file_name}**\n\n{caption}"
+        elif caption:
+            caption = "\n".join([f"> {line}" for line in caption.strip().splitlines()])
+        else:
+            caption = ">𓍯𝙎𝙪𝙟𝙖𝙡⚝"
+
+        # Send the message with the right method
         if msg.video:
             return await app.send_video(
                 target_chat_id,
                 msg.video.file_id,
                 caption=caption,
                 reply_to_message_id=topic_id,
-                parse_mode=ParseMode.HTML,
+                
             )
 
         if msg.document:
@@ -695,7 +657,7 @@ async def send_media_message(app, target_chat_id, msg, caption, topic_id):
                 msg.document.file_id,
                 caption=caption,
                 reply_to_message_id=topic_id,
-                parse_mode=ParseMode.HTML,
+                
             )
 
         if msg.photo:
@@ -704,15 +666,13 @@ async def send_media_message(app, target_chat_id, msg, caption, topic_id):
                 msg.photo.file_id,
                 caption=caption,
                 reply_to_message_id=topic_id,
-                parse_mode=ParseMode.HTML,
+                
             )
 
     except Exception as e:
         print(f"Error while sending media: {e}")
-        return await app.send_message(
-            target_chat_id,
-            f"❌ Failed to send media.\\n\\nError: `{e}`"
-        )
+        return await app.send_message(target_chat_id, f"❌ Failed to send media.\n\nError: `{e}`")
+
 
 def format_caption(original_caption, sender, custom_caption):
     delete_words = load_delete_words(sender)
